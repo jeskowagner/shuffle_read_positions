@@ -77,27 +77,30 @@ shuffle_read_positions =
     dat.df[,processing_width_tmp := (get(end.col) - get(start.col)), by = names(dat.df)]
     
     if(verbose) message("Assigning new read positions.")
-    # Loop over chromosomes
-    for(cur_chrom in dat.df[,as.character(unique(get(chr.col)))]) {
-      
-      dat.df[get(chr.col) == cur_chrom, # select only reads from the same chromosome
-             
-             # Generate random number between 1 and the size of the chromosome minus the width of the read
-             eval(start.col) := round(digits = 0,
-                                      runif(n = 1,
-                                            min = 1,
-                                            max = chrom.sizes[cur_chrom, UCSC_seqlength] - processing_width_tmp - 1 # honor 1-based coordinates
-                                      )), 
-             by = names(dat.df)
-             ]
-      
-      # Add the new end postion of the read based on the previously calculated width
-      dat.df[get(chr.col) == cur_chrom, eval(end.col) := get(start.col) + processing_width_tmp, ]
-      
-    }
+    
+    # Left join the chromosome sizes
+    dat.df[chrom.sizes, processing_width_chr := UCSC_seqlength]
+    
+    # Calculate new start positions
+    dat.df[get(chr.col) == cur_chrom, # select only reads from the same chromosome
+           
+           # Generate random number between 1 and the size of the chromosome minus the width of the read
+           eval(start.col) := round(digits = 0,
+                                    runif(n = 1,
+                                          min = 1,
+                                          max = processing_width_chr - processing_width_tmp - 1 # honor 1-based coordinates
+                                    )), 
+           by = names(dat.df)
+           ]
+    
+    # Add the new end postion of the read based on the previously calculated width
+    dat.df[, eval(end.col) := get(start.col) + processing_width_tmp, ]
+    
+    
     
     # Remove temporary column
     dat.df[, processing_width_tmp := NULL]
+    dat.df[, processing_width_chr := NULL]
     
     # Return
     dat.df[]
