@@ -1,5 +1,5 @@
 ### Author : Jesko Wagner
-### Date: 2020.01.10
+### Date: 2020.01.13
 ### Aim: shuffle positions of any genomic range across the chromosome
 ### to estimate if the read is positioned at its location by chance
 ### Note: currently this does not support strandedness.
@@ -11,55 +11,72 @@ shuffle_read_positions =
            start.col = "start",
            end.col = "end", 
            chromosomes = paste0("chr", c(1:22, "X","Y")),
-           chrom_sizes = NULL,
-           keep.extra.columns = T, verbose = F) {
+           chrom.sizes = NULL,
+           chrom.sizes.name.col = "UCSC_seqlevel",
+           chrom.sizes.length.col = "UCSC_seqlength",
+           verbose = F) {
     
     # Dependencies
     library(GenomicRanges)
     library(data.table)
     
-    # Sanity checks
-    if("data.frame" %in% class(dat.df) || "GRanges" == class(dat.df)) {
+    ### Sanity checks
+    if(verbose) message("Checking data integrity.")
+    
+    if(!any(is.data.frame(dat.df) | "GRanges" %in% class(dat.df))) {
       stop("Data must be data.frame or GRanges.")
     }
     
-    if(dat.df[,any(is.na(get(chr.col)))]) {
-      stop("Data must not have NA chromosome names.")
+    if(dat.df[,
+              any(is.na(get(chr.col))) |
+              any(is.na(get(start.col))) |
+              any(is.na(get(end.col)))
+              ]) {
+      stop("Data must not have NA values in chr, start, or end columnw.")
     }
     
-    if(dat.df[,any(is.na(get(start.col)))]) {
-      stop("Data must not have NA start positions.")
-    }
-    
-    if(dat.df[,any(is.na(get(end.col)))]) {
-      stop("Data must not have NA end positions.")
-    }
-    
-    
-    if(is.null(chrom_sizes)) {
+    # Have chromosome sizes been provided? If no, download. If yes, check data
+    if(is.null(chrom.sizes)) {
       # Prepare, download chromosome sizes and obtain only those of required chromosomes
-      chrom_sizes = fetchExtendedChromInfoFromUCSC(genome, quiet = T)
-      chrom_sizes = as.data.table(chrom_sizes)
-      chrom_sizes = chrom_sizes[UCSC_seqlevel %in% chromosomes,
-                            .(UCSC_seqlevel, UCSC_seqlength)]
-      setkey(chrom_sizes, UCSC_seqlevel)
+      if(verbose) message("Downloading chromosome information from UCSC.")
+      
+      chrom.sizes = fetchExtendedChromInfoFromUCSC(genome, quiet = T)
+      chrom.sizes = as.data.table(chrom.sizes)
+      chrom.sizes = chrom.sizes[UCSC_seqlevel %in% chromosomes,
+                                .(UCSC_seqlevel, UCSC_seqlength)]
+      
     } else {
-      chrom_sizes = as.data.table()  # if providing chromosomes sizes, column with sizes has to be either chr or UCSC_seqlevel
-      # this needs further improvement to check also for chromosome names and data integrity
-      if("chr" %in% names(chrom_sizes)) setnames(chrom_sizes, chr, UCSC_seqlevel)
-      setkey(chrom_sizes, UCSC_seqlevel)
+      chrom.sizes = as.data.table(chrom.sizes)  
+      
+      if(!is.null(chrom.sizes.name.col)) 
+        setnames(chrom.sizes, old = chrom.sizes.name.col, new = "UCSC_seqlevel")
+      
+      if(!is.null(chrom.sizes.length.col)) 
+        setnames(chrom.sizes, old = chrom.sizes.length.col, new = "UCSC_seqlength")
+    }
+    
+    # Check that all entered chromosome information is correct
+    if (chrom.sizes[, 
+                    !is.numeric(UCSC_seqlength) | 
+                    !(length(unique(UCSC_seqlevel)) == length(UCSC_seqlevel))
+                    ]) {
+      stop("chrom.sizes contains invalid or duplicate values.")
     }
     
     
+    ### End sanity checks
+    
+    # Keying allows keyed join for additional speed
+    setkey(chrom.sizes, UCSC_seqlevel)
     
     # Convert to dt for memory efficiency
     dat.df = as.data.table(dat.df)
     
-   
-    
     # Add temporary column containing the length of the read
+    if(verbose) message("Calculating read length.")
     dat.df[,processing_width_tmp := (get(end.col) - get(start.col)), by = names(dat.df)]
     
+    if(verbose) message("Assigning new read positions.")
     # Loop over chromosomes
     for(cur_chrom in dat.df[,as.character(unique(get(chr.col)))]) {
       
@@ -69,7 +86,7 @@ shuffle_read_positions =
              eval(start.col) := round(digits = 0,
                                       runif(n = 1,
                                             min = 1,
-                                            max = chrom_sizes[cur_chrom, UCSC_seqlength] - processing_width_tmp - 1 # honor 1-based coordinates
+                                            max = chrom.sizes[cur_chrom, UCSC_seqlength] - processing_width_tmp - 1 # honor 1-based coordinates
                                       )), 
              by = names(dat.df)
              ]
