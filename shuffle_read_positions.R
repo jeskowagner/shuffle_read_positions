@@ -8,7 +8,7 @@
 ### Note: currently this does not support strandedness.
 
 shuffle_read_positions = 
-  function(dat.df,
+  function(reads.df,
            genome = "hg19",
            chr.col = "chr",
            start.col = "start",
@@ -26,11 +26,11 @@ shuffle_read_positions =
     ### Sanity checks
     if(verbose) message("Checking data integrity.")
     
-    if(!any(is.data.frame(dat.df) | "GRanges" %in% class(dat.df))) {
+    if(!any(is.data.frame(reads.df) | "GRanges" %in% class(reads.df))) {
       stop("Data must be data.frame or GRanges.")
     }
     
-    if(dat.df[,
+    if(reads.df[,
               any(is.na(get(chr.col))) |
               any(is.na(get(start.col))) |
               any(is.na(get(end.col)))
@@ -73,44 +73,47 @@ shuffle_read_positions =
     setkey(chrom.sizes, UCSC_seqlevel)
     
     # Convert to dt for memory efficiency
-    dat.df = as.data.table(dat.df)
+    reads.df = as.data.table(reads.df)
     
     # Add temporary column containing the length of the read
     if(verbose) message("Calculating read length.")
-    dat.df[,processing_width_tmp := (get(end.col) - get(start.col)), by = names(dat.df)]
     
-    if(verbose) message("Assigning new read positions.")
+    reads.df[,processing_width_tmp := (get(end.col) - get(start.col)), by = names(reads.df)]
+    
     
     # Left join the chromosome sizes
-    dat.df[chrom.sizes, processing_width_chr := UCSC_seqlength]
+    reads.df[chrom.sizes, processing_width_chr := UCSC_seqlength]
     
     # Calculate new start positions
-    dat.df[,
+    if(verbose) message("Assigning new read positions.")
+    
+    reads.df[,
            # Generate random number between 1 and the size of the chromosome minus the width of the read
            eval(start.col) := round(digits = 0,
                                     runif(n = 1,
                                           min = 1,
                                           max = processing_width_chr - processing_width_tmp - 1 # honor 1-based coordinates
                                     )), 
-           by = names(dat.df)
+           by = names(reads.df)
            ]
     
     # Add the new end postion of the read based on the previously calculated width
-    dat.df[, eval(end.col) := get(start.col) + processing_width_tmp, ]
+    reads.df[, eval(end.col) := get(start.col) + processing_width_tmp, ]
     
     
     
     # Remove temporary column
-    dat.df[, processing_width_tmp := NULL]
-    dat.df[, processing_width_chr := NULL]
+    reads.df[, processing_width_tmp := NULL]
+    reads.df[, processing_width_chr := NULL]
     
     # Return
-    dat.df[]
+    reads.df[]
   }
 
-### Aim: update binned genome to count reads per bin and add them to the possibly present count column
+### Aim: update binned genome to count read ends per bin and add them to the possibly present count column
 ### Warning: this will  update your object in the calling environment to stay efficient
 add_reads_per_bin = function(reads.df, bin.df, reads.key = key(reads.df), bin.key = key(bin.df)) {
+  
   library(data.table)
   
   # Sanity check
@@ -121,25 +124,48 @@ add_reads_per_bin = function(reads.df, bin.df, reads.key = key(reads.df), bin.ke
   if(!haskey(reads.df)) setkeyv(reads.df, reads.key)
   if(!haskey(bin.df))   setkeyv(bin.df, bin.key)
   
-  # Find overlaps
-  readspb = foverlaps(which = T, reads.df, bin.df)
+  # Copy start and end column to make ranges of: start to start, end to end
+  # This allows to find only the read ends which overlap
+  reads.df[,eval(paste0(reads.key[2], "_copy")) := get(key(reads.df)[2])]
+  reads.df[,eval(paste0(reads.key[3], "_copy")) := get(key(reads.df)[3])]
   
-  # Count reads per bin
-  readspb[,count := .N, by=yid]
   
-  readspb[,xid := NULL]
+  ## Find overlaps
+  # Start position in bins
+  start_in_bin = foverlaps(which = T, reads.df, bin.df, by.x=c(reads.key[1], reads.key[2], paste0(reads.key[2],"_copy")))
   
   # Prepare for fast join
-  setkey(readspb, yid)
+  setkey(start_in_bin, yid)
+  start_in_bin[,xid := NULL]
+
+  # End position in bins
+  end_in_bin   = foverlaps(which = T, reads.df, bin.df, by.x=c(reads.key[1], reads.key[3], paste0(reads.key[3],"_copy")))
   
-  # Collapse
-  readspb = unique(readspb)
+  # Prepare for fast join
+  setkey(end_in_bin, yid)
+  end_in_bin[,xid := NULL]
   
+  ## Merge
+  read_in_bin = rbind(start_in_bin, end_in_bin)
+  read_in_bin[,count := .N, by = yid]
+  read_in_bin = unique(read_in_bin)
+  setkey(read_in_bin, yid)
+  
+  ### Sanity check
+  if(nrow(reads.df) * 2 != read_in_bin[,sum(count)])
+    stop("Data failed sanity check. More of fewer read ends placed than there are reads (reads * 2 = possible ends to be placed).")
+  ### End sanity check
+  
+  ## Add counts back onto bin.df
   # If the bins do not yet contain counts, then first add the column
   if(!"count" %in% names(bin.df)) {
     bin.df[,count:=0]
   }
   
   # Merge counts back onto bin df
-  bin.df[readspb, count := count+i.count, on = "yid"]
+  bin.df[read_in_bin, count := count+i.count, on = "yid"]
+  
+  # Remove temporary columns
+  reads.df[,eval(paste0(reads.key[2], "_copy")) := NULL]
+  reads.df[,eval(paste0(reads.key[3], "_copy")) := NULL]
 }
