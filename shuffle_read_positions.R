@@ -115,8 +115,9 @@ shuffle_sv_positions =
     sv.df[, processing_width_chr1 := NULL]
     sv.df[, processing_width_chr2 := NULL]
     
+    setkeyv(sv.df, key.cols)
     # Return
-    sv.df[]
+    sv.df
   }
 
 
@@ -245,7 +246,7 @@ add_reads_per_bin = function(reads.df, bin.df, reads.key = key(reads.df), bin.ke
   # Copy start and end column to make ranges of: start to start, end to end
   # This allows to find only the read ends which overlap
   reads.df[,eval(paste0(reads.key[2], "_copy")) := get(key(reads.df)[2])]
-  reads.df[,eval(paste0(reads.key[3], "_copy")) := get(key(reads.df)[3])]
+  reads.df[,eval(paste0(reads.key[4], "_copy")) := get(key(reads.df)[4])]
   
   
   ## Find overlaps
@@ -257,7 +258,7 @@ add_reads_per_bin = function(reads.df, bin.df, reads.key = key(reads.df), bin.ke
   start_in_bin[,xid := NULL]
 
   # End position in bins
-  end_in_bin   = foverlaps(which = T, reads.df, bin.df, by.x=c(reads.key[1], reads.key[3], paste0(reads.key[3],"_copy")))
+  end_in_bin   = foverlaps(which = T, reads.df, bin.df, by.x=c(reads.key[3], reads.key[4], paste0(reads.key[4],"_copy")))
   
   # Prepare for fast join
   setkey(end_in_bin, yid)
@@ -285,5 +286,5 @@ add_reads_per_bin = function(reads.df, bin.df, reads.key = key(reads.df), bin.ke
   
   # Remove temporary columns
   reads.df[,eval(paste0(reads.key[2], "_copy")) := NULL]
-  reads.df[,eval(paste0(reads.key[3], "_copy")) := NULL]
+  reads.df[,eval(paste0(reads.key[4], "_copy")) := NULL]
 }
