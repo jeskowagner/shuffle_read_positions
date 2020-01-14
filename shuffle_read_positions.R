@@ -1,5 +1,8 @@
 ### Author : Jesko Wagner
 ### Date: 2020.01.13
+
+
+
 ### Aim: shuffle positions of any genomic range across the chromosome
 ### to estimate if the read is positioned at its location by chance
 ### Note: currently this does not support strandedness.
@@ -10,7 +13,7 @@ shuffle_read_positions =
            chr.col = "chr",
            start.col = "start",
            end.col = "end", 
-           chromosomes = paste0("chr", c(1:22, "X","Y")),
+           chromosomes = paste0("chr", c(1:22, "X", "Y")),
            chrom.sizes = NULL,
            chrom.sizes.name.col = "UCSC_seqlevel",
            chrom.sizes.length.col = "UCSC_seqlength",
@@ -82,8 +85,7 @@ shuffle_read_positions =
     dat.df[chrom.sizes, processing_width_chr := UCSC_seqlength]
     
     # Calculate new start positions
-    dat.df[get(chr.col) == cur_chrom, # select only reads from the same chromosome
-           
+    dat.df[,
            # Generate random number between 1 and the size of the chromosome minus the width of the read
            eval(start.col) := round(digits = 0,
                                     runif(n = 1,
@@ -105,3 +107,39 @@ shuffle_read_positions =
     # Return
     dat.df[]
   }
+
+### Aim: update binned genome to count reads per bin and add them to the possibly present count column
+### Warning: this will  update your object in the calling environment to stay efficient
+add_reads_per_bin = function(reads.df, bin.df, reads.key = key(reads.df), bin.key = key(bin.df)) {
+  library(data.table)
+  
+  # Sanity check
+  if(!is.data.table(reads.df)) reads.df = as.data.table(reads.df)
+  if(!is.data.table(bin.df))   bin.df = as.data.table(bin.df)
+  
+  # Assign keys for fast overlapping
+  if(!haskey(reads.df)) setkeyv(reads.df, reads.key)
+  if(!haskey(bin.df))   setkeyv(bin.df, bin.key)
+  
+  # Find overlaps
+  readspb = foverlaps(which = T, reads.df, bin.df)
+  
+  # Count reads per bin
+  readspb[,count := .N, by=yid]
+  
+  readspb[,xid := NULL]
+  
+  # Prepare for fast join
+  setkey(readspb, yid)
+  
+  # Collapse
+  readspb = unique(readspb)
+  
+  # If the bins do not yet contain counts, then first add the column
+  if(!"count" %in% names(bin.df)) {
+    bin.df[,count:=0]
+  }
+  
+  # Merge counts back onto bin df
+  bin.df[readspb, count := count+i.count, on = "yid"]
+}
