@@ -234,6 +234,7 @@ shuffle_read_positions =
 add_reads_per_bin = function(reads.df, bin.df, reads.key = key(reads.df), bin.key = key(bin.df)) {
   
   library(data.table)
+  library(purrr)
   
   # Sanity check
   if(!is.data.table(reads.df)) reads.df = as.data.table(reads.df)
@@ -276,13 +277,24 @@ add_reads_per_bin = function(reads.df, bin.df, reads.key = key(reads.df), bin.ke
   ### End sanity check
   
   ## Add counts back onto bin.df
-  # If the bins do not yet contain counts, then first add the column
-  if(!"count" %in% names(bin.df)) {
-    bin.df[,count:=0]
+  # If this is the first run, make the column run_1
+  if(!any(grepl("run_", names(bin.df)))) {
+    new_colName = "run_1"
+  } else {
+    # get the highest run number
+    tmp_int =
+      names(bin.df) %>%
+      .[grepl(., pattern = "run_")] %>%
+      sub("run_", "", .) %>%
+      as.numeric %>%
+      max
+    new_colName = paste0("run_", tmp_int+1)
+      
   }
   
   # Merge counts back onto bin df
-  bin.df[read_in_bin, count := count+i.count, on = "yid"]
+  bin.df[read_in_bin, eval(new_colName) := count, on = "yid"]
+  bin.df[is.na(get(new_colName)), eval(new_colName) := 0]
   
   # Remove temporary columns
   reads.df[,eval(paste0(reads.key[2], "_copy")) := NULL]
